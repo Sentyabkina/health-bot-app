@@ -98,9 +98,11 @@
 <script>
 "use strict";
 const tg = window.Telegram && window.Telegram.WebApp;
-const IN_TG = !!(tg && tg.initData);           // открыто внутри Telegram, а не просто в браузере
+// Открыто внутри Telegram? initData тут не годится: при запуске с кнопки клавиатуры он пустой
+// (документация Telegram). Вне Telegram platform = "unknown".
+const IN_TG = !!(tg && tg.platform && tg.platform !== "unknown");
 const NUMS = new URLSearchParams(location.search).get("nums") !== "0";  // человек скрыл калории — не показываем
-const DATA_VERSION = "1";
+const DATA_VERSION = "2";
 if (tg) { document.documentElement.setAttribute("data-tg", ""); tg.ready(); tg.expand(); }
 
 // ---------- Слова: так же, как в боте (products.py) ----------
@@ -408,7 +410,10 @@ async function submit() {
   send(s);
 }
 function send(s) {   // данные уходят боту сообщением; Telegram после этого закрывает приложение
-  if (IN_TG) tg.sendData(s); else { console.log("sendData", s); toast("Отправлено (проверка вне Telegram)"); }
+  if (!IN_TG) { console.log("sendData", s); toast("Отправлено (проверка вне Telegram)"); return; }
+  try { tg.sendData(s); } catch (e) { toast("Не отправилось: " + e.message); return; }
+  // Если приложение не закрылось — Telegram не принял данные (открыто не кнопкой внизу чата)
+  setTimeout(() => toast("Не отправилось. Закройте и откройте кнопкой «🍽 Записать еду» внизу чата"), 2500);
 }
 if (IN_TG) tg.MainButton.onClick(submit);
 $("fallbackBtn").addEventListener("click", submit);
@@ -420,8 +425,12 @@ function loadRecent() {
   return new Promise(resolve => {
     const local = () => { try { return localStorage.getItem("recent") || "[]"; } catch (e) { return "[]"; } };
     const done = v => { try { recent = JSON.parse(v) || []; } catch (e) { recent = []; } resolve(); };
-    if (cloud()) tg.CloudStorage.getItem("recent", (err, v) => done(err || !v ? local() : v));
-    else done(local());
+    let finished = false;
+    const once = v => { if (!finished) { finished = true; done(v); } };
+    setTimeout(() => once(local()), 1500);   // хранилище Telegram не ответило — берём из браузера
+    if (cloud()) {
+      try { tg.CloudStorage.getItem("recent", (err, v) => once(err || !v ? local() : v)); } catch (e) { once(local()); }
+    } else once(local());
   });
 }
 function saveRecent() {
