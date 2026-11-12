@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>Записать еду</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  /* Цвета берём из темы Telegram — приложение выглядит «как родное» и в светлой, и в тёмной теме */
+  :root {
+    --bg: var(--tg-theme-bg-color, #ffffff);
+    --text: var(--tg-theme-text-color, #1c1c1e);
+    --hint: var(--tg-theme-hint-color, #8e8e93);
+    --link: var(--tg-theme-link-color, #2a7ae2);
+    --btn: var(--tg-theme-button-color, #2a7ae2);
+    --btn-text: var(--tg-theme-button-text-color, #ffffff);
+    --section: var(--tg-theme-section-bg-color, var(--tg-theme-secondary-bg-color, #f2f2f7));
+    --sep: var(--tg-theme-section-separator-color, rgba(128,128,128,.22));
+    --danger: var(--tg-theme-destructive-text-color, #e5484d);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-tg]) { --bg:#1c1c1e; --text:#f2f2f7; --hint:#8e8e93; --section:#2c2c2e; }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  body { padding: 0 16px 96px; }
+  .top { position: sticky; top: 0; background: var(--bg); padding: 12px 0 8px; z-index: 5; }
+  .search { width: 100%; font-size: 17px; padding: 11px 14px; border-radius: 12px; border: 0;
+    background: var(--section); color: var(--text); outline: none; }
+  .search::placeholder { color: var(--hint); }
+  h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em;
+    color: var(--hint); margin: 18px 4px 6px; }
+  .list { background: var(--section); border-radius: 12px; overflow: hidden; }
+  .row { display: flex; align-items: center; gap: 10px; padding: 11px 14px; cursor: pointer; }
+  .row + .row { border-top: 1px solid var(--sep); }
+  .row .main { flex: 1; min-width: 0; }
+  .row .name { overflow-wrap: anywhere; }
+  .row .sub { color: var(--hint); font-size: 13px; margin-top: 1px; overflow-wrap: anywhere; }
+  .row .kcal { color: var(--hint); font-size: 14px; white-space: nowrap; }
+  .row.total { cursor: default; font-weight: 600; }
+  .row.total .sub { font-weight: 400; }
+  .row.own .name { color: var(--link); }
+  .plus { border: 0; background: var(--bg); color: var(--link); font-size: 14px; padding: 6px 10px;
+    border-radius: 9px; white-space: nowrap; cursor: pointer; }
+  .empty { color: var(--hint); padding: 14px 4px; }
+  .foot { color: var(--hint); font-size: 13px; margin: 22px 4px 0; }
+  .foot a { color: var(--link); text-decoration: none; cursor: pointer; }
+  .fallback-btn { position: fixed; left: 16px; right: 16px; bottom: 16px; padding: 14px; border: 0;
+    border-radius: 12px; background: var(--btn); color: var(--btn-text); font-size: 16px; font-weight: 600;
+    display: none; }
+  .toast { position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); background: rgba(0,0,0,.78);
+    color: #fff; padding: 8px 14px; border-radius: 10px; font-size: 14px; opacity: 0; transition: opacity .2s;
+    pointer-events: none; max-width: calc(100% - 32px); text-align: center; z-index: 30; }
+  .toast.on { opacity: 1; }
+  /* Окно порции — сверху, чтобы клавиатура телефона его не закрывала */
+  .shade { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: none; z-index: 20; }
+  .sheet { position: fixed; left: 0; right: 0; top: 0; background: var(--bg); border-radius: 0 0 16px 16px;
+    padding: 16px 16px 14px; display: none; z-index: 21; max-height: 100%; overflow-y: auto; }
+  .sheet.on, .shade.on { display: block; }
+  .sheet .title { font-size: 18px; font-weight: 600; overflow-wrap: anywhere; }
+  .sheet .per { color: var(--hint); font-size: 14px; margin-top: 2px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
+  .chip { border: 0; background: var(--section); color: var(--text); padding: 8px 12px; border-radius: 18px;
+    font-size: 15px; cursor: pointer; }
+  .chip.on { background: var(--btn); color: var(--btn-text); }
+  .amount { display: flex; align-items: center; gap: 10px; }
+  .amount input, .field input { font-size: 20px; padding: 9px 12px; border-radius: 10px; border: 0;
+    background: var(--section); color: var(--text); outline: none; }
+  .amount input { width: 120px; }
+  .amount .res { font-size: 18px; color: var(--hint); }
+  .field { margin: 12px 0; }
+  .field label { display: block; color: var(--hint); font-size: 14px; margin-bottom: 5px; }
+  .field input { width: 100%; font-size: 17px; }
+  .actions { display: flex; gap: 10px; margin-top: 16px; }
+  .actions button { flex: 1; padding: 13px; border: 0; border-radius: 12px; font-size: 16px; font-weight: 600;
+    cursor: pointer; }
+  .primary { background: var(--btn); color: var(--btn-text); }
+  .secondary { background: var(--section); color: var(--danger); }
+</style>
+</head>
+<body>
+<div class="top">
+  <input id="q" class="search" type="search" autocomplete="off" enterkeyhint="search"
+         placeholder="Найти: гречка, творог, сникерс…">
+</div>
+<div id="view"></div>
+<div class="foot">
+  <a id="toText">✍️ Написать текстом или выбрать из «Моих блюд»</a><br><br>
+  Данные: USDA FoodData Central; Open Food Facts (лицензия ODbL). Цифры по товарам из магазинов внесены
+  людьми и могут ошибаться.
+</div>
+<button id="fallbackBtn" class="fallback-btn"></button>
+<div id="toast" class="toast"></div>
+<div id="shade" class="shade"></div>
+<div id="sheet" class="sheet"></div>
+
+<script>
+"use strict";
+const tg = window.Telegram && window.Telegram.WebApp;
+const IN_TG = !!(tg && tg.initData);           // открыто внутри Telegram, а не просто в браузере
+const NUMS = new URLSearchParams(location.search).get("nums") !== "0";  // человек скрыл калории — не показываем
+const DATA_VERSION = "1";
+if (tg) { document.documentElement.setAttribute("data-tg", ""); tg.ready(); tg.expand(); }
+
+// ---------- Слова: так же, как в боте (products.py) ----------
+const STOP = new Set(["с", "со", "и", "в", "во", "на", "без", "для", "из", "по"]);
+const UNITS = new Set(["г", "гр", "грамм", "грамма", "граммов", "грам", "кг", "мл", "л", "шт", "штук", "штуки"]);
+const ENDINGS = new Set(["", "а", "я", "ы", "и", "у", "ю", "е", "о", "ой", "ом", "ей", "ем", "ам", "ами", "ах",
+                         "ую", "ая", "ые", "ий"]);
+const norm = s => s.toLowerCase().replace(/ё/g, "е").replace(/-/g, "");
+const words = s => (norm(s).match(/\d+(?:[.,]\d+)?%|[a-zа-я0-9]+/g) || []).filter(w => !/^\d+$/.test(w));
+function same(a, b) {   // одно слово в разных формах: «творога» — «творог», «яйца» — «яйцо»
+  if (a.slice(0, 5) === b.slice(0, 5) && Math.abs(a.length - b.length) <= 2) return true;
+  if (a.endsWith("%") || b.endsWith("%")) return false;
+  for (let n = 3; n <= Math.min(a.length, b.length); n++)
+    if (a.slice(0, n) === b.slice(0, n) && ENDINGS.has(a.slice(n)) && ENDINGS.has(b.slice(n))) return true;
+  return false;
+}
+const match = (w, x) => (w.length >= 2 && x.startsWith(w)) || same(w, x);  // «юб» подходит к «юбилейное»
+
+// ---------- База ----------
+let ALL = [], BY_ID = new Map(), offLoaded = false;
+function addBase(rows) {    // наша база: [id, name, synonyms, kcal, p, f, c, fiber, piece, tbsp, tsp, ml]
+  for (const r of rows) {
+    const variants = [r[1], ...r[2].split(",")].filter(s => s.trim()).map(words);
+    add({ id: r[0], name: r[1], brand: "", k: r[3], p: r[4], f: r[5], c: r[6], pc: r[8], tb: r[9], ts: r[10],
+          ml: r[11], tier: 0, variants, keys: variants.flat() });
+  }
+}
+function addOff(rows) {  // магазины: [id, name, brand, kcal, p, f, c, piece, search words, ≈piece]
+  for (const r of rows) {
+    const nameW = words(r[1]);
+    add({ id: r[0], name: r[1], brand: r[2], k: r[3], p: r[4], f: r[5], c: r[6], pc: r[7], pe: r[9], tier: 1,
+          variants: [nameW], keys: nameW.concat(words(r[8])) });
+  }
+}
+function add(p) { ALL.push(p); BY_ID.set(p.id, p); }
+
+function search(q) {
+  const qw = words(q).filter(w => !STOP.has(w) && !UNITS.has(w));
+  if (!qw.length) return [];
+  const found = [];
+  for (const p of ALL) {
+    if (!qw.every(w => p.keys.some(x => match(w, x)))) continue;
+    let cover = 0;  // какая доля слов названия совпала: «Печенье Юбилейное» выше «… с хлопьями в корзине»
+    for (const v of p.variants) {
+      if (!v.length) continue;
+      const c = v.filter(x => qw.some(w => match(w, x))).length / v.length;
+      if (c > cover) cover = c;
+    }
+    const first = p.variants.some(v => v.length && match(qw[0], v[0])) ? 0 : 1;  // запрос — начало названия
+    found.push([first, p.tier, -cover, p.name.length, p]);
+  }
+  found.sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2] || a[3] - b[3]);
+  return found.slice(0, 60).map(x => x[4]);
+}
+
+// ---------- Приём пищи ----------
+let items = [];          // {id, g, label} или {own: true, name, kcal}
+let recent = [];         // [[id, g, label]] или [["own", name, kcal]]
+let misses = [];         // что искали и не нашли — нутрициолог добавит в базу в первую очередь
+const kcalOf = it => it.own ? (it.kcal || 0) : Math.round(BY_ID.get(it.id).k * it.g / 100);
+const total = () => items.reduce((s, it) => s + kcalOf(it), 0);
+const amountText = (g, label) => label ? `${label} · ${Math.round(g)} г` : `${Math.round(g)} г`;
+const esc = s => String(s).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;",
+                                                      "'": "&#39;" }[ch]));
+const per100 = p => NUMS ? `${Math.round(p.k)} ккал / 100 г` : "";
+
+function macrosText() {
+  let p = 0, f = 0, c = 0;
+  for (const it of items) if (!it.own) {
+    const pr = BY_ID.get(it.id); p += pr.p * it.g / 100; f += pr.f * it.g / 100; c += pr.c * it.g / 100;
+  }
+  return `Б ${Math.round(p)} · Ж ${Math.round(f)} · У ${Math.round(c)} г`;
+}
+
+// ---------- Экран ----------
+const $ = id => document.getElementById(id);
+const view = $("view"), q = $("q");
+
+function row({ name, sub = "", kcal = "", cls = "", plus = "", data = "" }) {
+  return `<div class="row ${cls}" ${data}><div class="main"><div class="name">${name}</div>` +
+         (sub ? `<div class="sub">${sub}</div>` : "") + `</div>` +
+         (kcal ? `<div class="kcal">${kcal}</div>` : "") +
+         (plus ? `<button class="plus" ${plus}</button>` : "") + `</div>`;
+}
+
+let lastCount = 0;   // сколько нашлось при последнем поиске
+function render() {
+  const text = q.value.trim();
+  let html = "";
+  if (text) {
+    const res = search(text);
+    lastCount = res.length;
+    html += `<h2>${res.length ? "Нашлось" : "Ничего не нашлось"}</h2><div class="list">`;
+    for (const p of res)
+      html += row({ name: esc(p.name), sub: esc(p.brand), kcal: per100(p), data: `data-pick="${esc(p.id)}"` });
+    html += row({ name: `✏️ Записать «${esc(text)}» со своими калориями`, cls: "own", data: `data-own="1"` });
+    html += `</div>`;
+    if (!offLoaded) html += `<div class="empty">Загружаю продукты из магазинов…</div>`;
+  } else {
+    if (items.length) {
+      html += `<h2>В этом приёме</h2><div class="list">`;
+      items.forEach((it, i) => {
+        const name = it.own ? it.name : BY_ID.get(it.id).name;
+        const sub = it.own ? (NUMS ? "свои калории" : "") : amountText(it.g, it.label);
+        html += row({ name: esc(name), sub: esc(sub), kcal: NUMS ? `${kcalOf(it)} ккал` : "",
+                      data: `data-edit="${i}"` });
+      });
+      if (NUMS) html += row({ name: `Итого ${total()} ккал`, sub: macrosText(), cls: "total" });
+      html += `</div>`;
+    } else {
+      html += `<div class="empty">Найдите продукт и выберите порцию. Можно добавить несколько, ` +
+              `потом нажать «Записать».</div>`;
+    }
+    const rec = recent.filter(r => r[0] === "own" || BY_ID.has(r[0]));
+    if (rec.length) {
+      html += `<h2>Недавнее</h2><div class="list">`;
+      rec.forEach((r, i) => {
+        if (r[0] === "own") {
+          html += row({ name: esc(r[1]), sub: NUMS ? `${r[2]} ккал` : "", data: `data-recent="${i}"`,
+                        plus: `data-add="${i}">+ добавить` });
+        } else {
+          const p = BY_ID.get(r[0]);
+          html += row({ name: esc(p.name), sub: esc(p.brand), data: `data-recent="${i}"`,
+                        plus: `data-add="${i}">+ ${esc(r[2] || Math.round(r[1]) + " г")}` });
+        }
+      });
+      html += `</div>`;
+    }
+  }
+  view.innerHTML = html;
+  updateButton();
+}
+
+view.addEventListener("click", e => {
+  const add = e.target.closest("[data-add]");
+  if (add) { e.stopPropagation(); quickAdd(+add.dataset.add); return; }
+  const el = e.target.closest("[data-pick],[data-own],[data-edit],[data-recent]");
+  if (!el) return;
+  if (el.dataset.pick) openPortion(BY_ID.get(el.dataset.pick));
+  else if (el.dataset.own) { noteMiss(q.value.trim()); openOwn(q.value.trim()); }
+  else if (el.dataset.edit) {
+    const i = +el.dataset.edit, it = items[i];
+    it.own ? openOwn(it.name, it.kcal, i) : openPortion(BY_ID.get(it.id), it.g, it.label, i);
+  } else if (el.dataset.recent) {
+    const r = recentShown()[+el.dataset.recent];
+    r[0] === "own" ? openOwn(r[1], r[2]) : openPortion(BY_ID.get(r[0]), r[1], r[2]);
+  }
+});
+
+const recentShown = () => recent.filter(r => r[0] === "own" || BY_ID.has(r[0]));
+function quickAdd(i) {
+  const r = recentShown()[i];
+  if (r[0] === "own") items.push({ own: true, name: r[1], kcal: r[2] });
+  else items.push({ id: r[0], g: r[1], label: r[2] || "" });
+  toast(`Добавлено: ${r[0] === "own" ? r[1] : BY_ID.get(r[0]).name}`);
+  render();
+}
+
+let timer = null;
+q.addEventListener("input", () => {
+  clearTimeout(timer);
+  timer = setTimeout(() => {
+    render();
+    const t = q.value.trim();
+    if (t.length >= 3 && offLoaded && !lastCount) noteMiss(t);
+  }, 120);
+});
+
+function noteMiss(t) {
+  t = norm(t).slice(0, 40);
+  if (!t) return;
+  misses = misses.filter(m => !t.startsWith(m) && !m.startsWith(t));  // «борщ» вместо «бор», «борщ»
+  misses.push(t);
+  misses = misses.slice(-5);
+}
+
+// ---------- Окно порции ----------
+const sheet = $("sheet"), shade = $("shade");
+let closeSheet = () => {};
+
+function showSheet(html, onClose) {
+  sheet.innerHTML = html;
+  sheet.classList.add("on"); shade.classList.add("on");
+  closeSheet = () => {
+    sheet.classList.remove("on"); shade.classList.remove("on");
+    if (tg) { tg.BackButton.hide(); tg.BackButton.offClick(closeSheet); }
+    updateButton();
+    if (onClose) onClose();
+  };
+  if (tg) { tg.BackButton.show(); tg.BackButton.onClick(closeSheet); tg.MainButton.hide(); }
+  $("fallbackBtn").style.display = "none";
+}
+shade.addEventListener("click", () => closeSheet());
+
+function portionOptions(p) {
+  const o = [];
+  if (p.pc) o.push(["½ шт", p.pc / 2], ["1 шт", p.pc], ["2 шт", p.pc * 2]);
+  else if (p.pe) o.push(["≈ ½ шт", p.pe / 2], ["≈ 1 шт", p.pe], ["≈ 2 шт", p.pe * 2]);  // вес по похожим товарам
+  if (p.tb) o.push(["1 ст. л.", p.tb]);
+  if (p.ts) o.push(["1 ч. л.", p.ts]);
+  if (p.ml) o.push(["стакан 200 мл", 200 * p.ml]);
+  for (const g of [50, 100, 150, 200, 300]) o.push([`${g} г`, g]);
+  return o;
+}
+
+function openPortion(p, grams, label, editIndex) {
+  if (!p) return;
+  const opts = portionOptions(p);
+  const piece = p.pc || p.pe;
+  let g = grams || piece || 100, lab = grams ? (label || "") : (p.pc ? "1 шт" : p.pe ? "≈ 1 шт" : "");
+  const chips = opts.map((o, i) =>
+    `<button class="chip" data-i="${i}">${esc(o[0])}${o[0].endsWith(" г") ? "" : ` · ${Math.round(o[1])} г`}</button>`
+  ).join("");
+  showSheet(`
+    <div class="title">${esc(p.name)}</div>
+    <div class="per">${esc([p.brand, per100(p)].filter(Boolean).join(" · "))}</div>
+    <div class="chips">${chips}</div>
+    <div class="amount"><input id="grams" type="number" inputmode="decimal" min="1" max="5000">
+      <span>г</span><span class="res" id="res"></span></div>
+    <div class="actions">
+      ${editIndex !== undefined ? `<button class="secondary" id="del">Убрать</button>` : ""}
+      <button class="primary" id="ok">${editIndex !== undefined ? "Сохранить" : "Добавить"}</button>
+    </div>`);
+  const inp = $("grams"), res = $("res");
+  const paint = () => {
+    inp.value = Math.round(g);
+    res.textContent = NUMS ? `= ${Math.round(p.k * g / 100)} ккал` : "";
+    sheet.querySelectorAll(".chip").forEach((c, i) =>
+      c.classList.toggle("on", opts[i][0] === lab || (!lab && opts[i][0] === `${Math.round(g)} г`)));
+  };
+  paint();
+  sheet.querySelector(".chips").addEventListener("click", e => {
+    const c = e.target.closest(".chip"); if (!c) return;
+    const o = opts[+c.dataset.i]; g = o[1]; lab = o[0].endsWith(" г") ? "" : o[0]; paint();
+  });
+  inp.addEventListener("input", () => {
+    const v = parseFloat(inp.value.replace(",", "."));
+    if (v > 0) { g = v; lab = ""; res.textContent = NUMS ? `= ${Math.round(p.k * g / 100)} ккал` : "";
+      sheet.querySelectorAll(".chip").forEach(c => c.classList.remove("on")); }
+  });
+  $("ok").addEventListener("click", () => {
+    if (!(g > 0 && g <= 5000)) { toast("Введите граммы"); return; }
+    const it = { id: p.id, g: Math.round(g), label: lab };
+    if (editIndex !== undefined) items[editIndex] = it; else items.push(it);
+    closeSheet();
+    if (editIndex === undefined) { q.value = ""; toast(`Добавлено: ${p.name}`); }
+    render();
+  });
+  if ($("del")) $("del").addEventListener("click", () => { items.splice(editIndex, 1); closeSheet(); render(); });
+}
+
+function openOwn(name, kcal, editIndex) {
+  showSheet(`
+    <div class="title">Своё блюдо или продукт</div>
+    <div class="per">Например, готовая еда с калорийностью на упаковке</div>
+    <div class="field"><label>Название</label><input id="ownName" maxlength="60"></div>
+    ${NUMS ? `<div class="field"><label>Калорий на всю порцию (не на 100 г)</label>
+      <input id="ownKcal" type="number" inputmode="numeric" min="0" max="5000"></div>` : ""}
+    <div class="actions">
+      ${editIndex !== undefined ? `<button class="secondary" id="del">Убрать</button>` : ""}
+      <button class="primary" id="ok">${editIndex !== undefined ? "Сохранить" : "Добавить"}</button>
+    </div>`);
+  $("ownName").value = name || "";
+  if (NUMS) $("ownKcal").value = kcal || "";
+  (NUMS && name ? $("ownKcal") : $("ownName")).focus();
+  $("ok").addEventListener("click", () => {
+    const n = $("ownName").value.trim();
+    const k = NUMS ? Math.round(parseFloat(($("ownKcal").value || "").replace(",", "."))) : 0;
+    if (!n) { toast("Напишите название"); return; }
+    if (NUMS && !(k >= 0 && k <= 5000)) { toast("Напишите калории на всю порцию"); return; }
+    const it = { own: true, name: n, kcal: k };
+    if (editIndex !== undefined) items[editIndex] = it; else items.push(it);
+    closeSheet();
+    if (editIndex === undefined) { q.value = ""; toast(`Добавлено: ${n}`); }
+    render();
+  });
+  if ($("del")) $("del").addEventListener("click", () => { items.splice(editIndex, 1); closeSheet(); render(); });
+}
+
+// ---------- Кнопка «Записать» ----------
+function updateButton() {
+  const text = NUMS ? `Записать · ${total()} ккал` : "Записать";
+  const show = items.length > 0 && !sheet.classList.contains("on");
+  if (IN_TG) {
+    tg.MainButton.setText(text);
+    show ? tg.MainButton.show() : tg.MainButton.hide();
+  } else {
+    const b = $("fallbackBtn"); b.textContent = text; b.style.display = show ? "block" : "none";
+  }
+}
+const bytes = s => new TextEncoder().encode(s).length;
+
+async function submit() {
+  if (!items.length) return;
+  const payload = {
+    v: 1,
+    i: items.filter(it => !it.own).map(it => [it.id, it.g, it.label || ""]),
+    o: items.filter(it => it.own).map(it => [it.name.slice(0, 60), it.kcal || 0]),
+    m: misses.slice(),
+  };
+  let s = JSON.stringify(payload);
+  while (bytes(s) > 4000 && payload.m.length) { payload.m.pop(); s = JSON.stringify(payload); }
+  if (bytes(s) > 4000) { toast("Слишком много продуктов за раз — запишите в два приёма"); return; }
+  await saveRecent();
+  send(s);
+}
+function send(s) {   // данные уходят боту сообщением; Telegram после этого закрывает приложение
+  if (IN_TG) tg.sendData(s); else { console.log("sendData", s); toast("Отправлено (проверка вне Telegram)"); }
+}
+if (IN_TG) tg.MainButton.onClick(submit);
+$("fallbackBtn").addEventListener("click", submit);
+$("toText").addEventListener("click", () => send(JSON.stringify({ v: 1, mode: "text" })));
+
+// ---------- Недавнее: хранится в Telegram (CloudStorage), запасной вариант — память браузера ----------
+const cloud = () => tg && tg.CloudStorage && tg.isVersionAtLeast && tg.isVersionAtLeast("6.9");
+function loadRecent() {
+  return new Promise(resolve => {
+    const local = () => { try { return localStorage.getItem("recent") || "[]"; } catch (e) { return "[]"; } };
+    const done = v => { try { recent = JSON.parse(v) || []; } catch (e) { recent = []; } resolve(); };
+    if (cloud()) tg.CloudStorage.getItem("recent", (err, v) => done(err || !v ? local() : v));
+    else done(local());
+  });
+}
+function saveRecent() {
+  const now = items.map(it => it.own ? ["own", it.name, it.kcal || 0] : [it.id, it.g, it.label || ""]);
+  const key = r => r[0] === "own" ? "own:" + r[1] : r[0];
+  const seen = new Set(), merged = [];
+  for (const r of now.concat(recent)) if (!seen.has(key(r))) { seen.add(key(r)); merged.push(r); }
+  let value = JSON.stringify(merged.slice(0, 20));
+  while (value.length > 4000) { merged.pop(); value = JSON.stringify(merged.slice(0, 20)); }
+  try { localStorage.setItem("recent", value); } catch (e) {}
+  return new Promise(resolve => {
+    if (!cloud()) return resolve();
+    tg.CloudStorage.setItem("recent", value, () => resolve());
+    setTimeout(resolve, 1000);  // не ждём дольше секунды
+  });
+}
+
+// ---------- Подсказка ----------
+let toastTimer = null;
+function toast(t) {
+  const el = $("toast"); el.textContent = t; el.classList.add("on");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("on"), 1600);
+}
+
+// ---------- Запуск: сначала маленькая база, магазины — следом ----------
+(async () => {
+  render();
+  try {
+    const [base] = await Promise.all([fetch(`data/base.json?v=${DATA_VERSION}`).then(r => r.json()), loadRecent()]);
+    addBase(base); render();
+    const off = await fetch(`data/off.json?v=${DATA_VERSION}`).then(r => r.json());
+    addOff(off); offLoaded = true; render();
+  } catch (e) {
+    view.innerHTML = `<div class="empty">Не получилось загрузить базу продуктов. Закройте и откройте ещё раз.</div>`;
+  }
+})();
+</script>
+</body>
+</html>
