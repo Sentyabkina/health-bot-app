@@ -131,7 +131,7 @@ const tg = window.Telegram && window.Telegram.WebApp;
 // (документация Telegram). Вне Telegram platform = "unknown".
 const IN_TG = !!(tg && tg.platform && tg.platform !== "unknown");
 const NUMS = new URLSearchParams(location.search).get("nums") !== "0";  // человек скрыл калории — не показываем
-const DATA_VERSION = "3";
+const DATA_VERSION = "4";
 const $ = id => document.getElementById(id);
 const ver = v => !!(tg && tg.isVersionAtLeast && tg.isVersionAtLeast(v));
 
@@ -157,7 +157,8 @@ applyTheme();
 const STOP = new Set(["с", "со", "и", "в", "во", "на", "без", "для", "из", "по"]);
 const UNITS = new Set(["г", "гр", "грамм", "грамма", "граммов", "грам", "кг", "мл", "л", "шт", "штук", "штуки"]);
 const ENDINGS = new Set(["", "а", "я", "ы", "и", "у", "ю", "е", "о", "ой", "ом", "ей", "ем", "ам", "ами", "ах",
-                         "ую", "ая", "ые", "ий"]);
+                         "ую", "ая", "ые", "ий", "ие", "их", "ых", "ым", "им", "ыми", "ими", "ого", "его", "ому",
+                         "ему", "ое", "ее"]);  // как в боте (products.py)
 const norm = s => s.toLowerCase().replace(/ё/g, "е").replace(/-/g, "");
 const words = s => (norm(s).match(/\d+(?:[.,]\d+)?%|[a-zа-я0-9]+/g) || []).filter(w => !/^\d+$/.test(w));
 function same(a, b) {   // одно слово в разных формах: «творога» — «творог», «яйца» — «яйцо»
