@@ -159,6 +159,10 @@
   .mini-list b { font-weight: 700; overflow-wrap: anywhere; }
   .mini-list i { font-style: normal; font-weight: 400; color: var(--hint); }
   .mini-list .k { white-space: nowrap; }
+  .trio { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .trio .field input { padding: 0 12px; }
+  .own-sum { font-size: 16px; font-weight: 800; color: var(--accent); padding: 0 4px; }
+  .own-sum:empty { display: none; }
 </style>
 </head>
 <body>
@@ -331,8 +335,23 @@ function prodTotals(it) {
   const pr = getP(it.id) || it, m = it.g / 100;
   return { k: pr.k * m, p: pr.p * m, f: pr.f * m, c: pr.c * m, fb: (pr.fb || 0) * m, g: it.g };
 }
+// Своё: калории и БЖУ, как их вписал человек, — на 100 г (тогда g — сколько граммов съел) или на всю порцию.
+// {own, name, m: "100" | "all", g, e: [ккал, Б, Ж, У]}; пустые Б/Ж/У — null (в сумму БЖУ не идут)
+const ownItem = (name, m, g, e) => ({ own: true, name, m: m === "100" ? "100" : "all", g: m === "100" ? g : 0, e });
+function ownT(it) {
+  const e = it.e || [it.kcal || 0, null, null, null];   // старый вид: {own, name, kcal}
+  const x = it.m === "100" ? (it.g || 0) / 100 : 1;
+  return { k: (e[0] || 0) * x, p: (e[1] || 0) * x, f: (e[2] || 0) * x, c: (e[3] || 0) * x, fb: 0, g: it.m === "100" ? it.g : 0 };
+}
+const ownToArr = it => ["own", it.name, it.m, r1(it.g), ...(it.e || [it.kcal || 0, null, null, null]).map(v => v === null ? null : r1(v))];
+function ownFromArr(a) {   // ["own", name, m, g, ккал, Б, Ж, У]; старый вид — ["own", name, ккал]
+  if (a.length <= 3) return ownItem(String(a[1]), "all", 0, [+a[2] || 0, null, null, null]);
+  const n = v => v === null || v === undefined || v === "" ? null : +v;
+  return ownItem(String(a[1]), a[2], +a[3] || 0, [+a[4] || 0, n(a[5]), n(a[6]), n(a[7])]);
+}
+const ownSub = it => !NUMS ? "" : it.m === "100" ? `свои · ${gText(it.g)}${NB}г` : "свои калории";
 function ingTotals(it) {   // строка состава блюда — на всё количество
-  if (it.own) return { k: it.kcal || 0, p: 0, f: 0, c: 0, fb: 0, g: 0 };
+  if (it.own) return ownT(it);
   if (it.fix) return { k: it.kcal, p: it.p, f: it.f, c: it.c, fb: it.fb, g: it.g || 0 };
   return prodTotals(it);
 }
@@ -350,15 +369,15 @@ function dishItemTotals(it) {   // моё блюдо в приёме: {dish, g} 
   return u.byWeight ? scale(u.per, it.g / 100) : scale(u.per, it.n);
 }
 function itemTotals(it) {   // строка приёма
-  if (it.own) return { k: it.kcal || 0, p: 0, f: 0, c: 0, fb: 0, g: 0 };
+  if (it.own) return ownT(it);
   if (it.dish) return dishItemTotals(it);
   return prodTotals(it);
 }
 const kcalOf = it => Math.round(itemTotals(it).k);
 
 // ---------- Приём пищи ----------
-let items = [];          // {id, g, label, unit, n} | {own, name, kcal} | {dish, g} или {dish, n, label}
-let recent = [];         // [[id, g, label, unit, n]] или [["own", name, kcal]]
+let items = [];          // {id, g, label, unit, n} | своё (ownItem) | {dish, g} или {dish, n, label}
+let recent = [];         // [[id, g, label, unit, n]] или ["own", …] (ownToArr)
 let misses = [];         // что искали и не нашли — нутрициолог добавит в базу в первую очередь
 const total = () => items.reduce((s, it) => s + kcalOf(it), 0);
 const amountText = (g, label) => label ? `${label} · ${gText(g)}${NB}г` : `${gText(g)}${NB}г`;
@@ -410,7 +429,7 @@ function packDish(d) {   // коротко, чтобы влезть в 4096 зн
   return JSON.stringify({
     n: d.name, t: d.type, m: d.mode, w: d.cooked || 0, s: d.portions || 0, c: d.created,
     i: d.items.map(it => {
-      if (it.own) return ["own", it.name, it.kcal || 0];
+      if (it.own) return ownToArr(it);
       if (it.fix) return ["fix", it.name, it.label || "", r1(it.kcal), r1(it.p), r1(it.f), r1(it.c), r1(it.fb), Math.round(it.g || 0)];
       const pr = getP(it.id) || it;
       return [it.id, r1(it.g), it.label || "", it.unit || "г", r1(it.n || it.g), pr.name, r1(pr.k), r1(pr.p), r1(pr.f),
@@ -425,7 +444,7 @@ function unpackDish(id, s) {
     const d = {
       id, name: String(o.n).slice(0, 60), type: o.t === "pot" ? "pot" : "one", mode: o.m === "portions" ? "portions" : "weight",
       cooked: +o.w || 0, portions: Math.max(1, +o.s || 1), created: +o.c || 0,
-      items: o.i.map(a => a[0] === "own" ? { own: true, name: String(a[1]), kcal: +a[2] || 0 }
+      items: o.i.map(a => a[0] === "own" ? ownFromArr(a)
         : a[0] === "fix" ? { fix: true, name: String(a[1]), label: a[2] || "", kcal: +a[3] || 0, p: +a[4] || 0, f: +a[5] || 0,
                              c: +a[6] || 0, fb: +a[7] || 0, g: +a[8] || 0 }
         : { id: String(a[0]), g: +a[1] || 0, label: a[2] || "", unit: a[3] || "г", n: +a[4] || +a[1] || 0,
@@ -534,7 +553,7 @@ function refresh() {   // база или блюда догрузились: р�
 
 function mealRow(it, i) {
   const data = `data-edit="${i}"`, kcal = NUMS ? `${kcalOf(it)} ккал` : "";
-  if (it.own) return row({ name: it.name, sub: NUMS ? "свои калории" : "", kcal, data });
+  if (it.own) return row({ name: it.name, sub: ownSub(it), kcal, data, ava: ICON.pencil });
   if (it.dish) {
     const d = dishById(it.dish);
     const sub = "моё блюдо · " + (d && dishUnit(d).byWeight ? `${Math.round(it.g)} г` : it.label);
@@ -552,12 +571,13 @@ function renderList() {
     const res = search(text);
     lastCount = res.length + ds.length;
     html += `<h2>${lastCount ? "Нашлось" : "Ничего не нашлось"}</h2><div class="card">`;
+    // своё — первой строкой: товаров бывает много, листать до конца неудобно
+    html += row({ name: `${scr === "pick" ? "Добавить" : "Записать"} «${text}» со своими калориями`, cls: "own",
+                  data: `data-own="1"`, ava: ICON.pencil });
     for (const d of ds)
       html += row({ name: d.name, sub: `моё блюдо · ${dishSub(d)}`, data: `data-dish="${esc(d.id)}"`, ava: ICON.pot, avaCls: "dish" });
     for (const p of res)
       html += row({ name: p.name, sub: [p.brand, per100(p)].filter(Boolean).join(" · "), data: `data-pick="${esc(p.id)}"` });
-    html += row({ name: `${scr === "pick" ? "Добавить" : "Записать"} «${text}» со своими калориями`, cls: "own",
-                  data: `data-own="1"`, ava: ICON.pencil });
     html += `</div>`;
     if (!offLoaded) html += `<div class="empty">Загружаю продукты из магазинов…</div>`;
   } else if (scr === "pick") {
@@ -592,7 +612,7 @@ function renderList() {
       html += `<h2>Недавнее</h2><div class="grid">`;
       rec.forEach((r, i) => {
         let name, sub;
-        if (r[0] === "own") { name = r[1]; sub = NUMS ? `свои · ${r[2]} ккал` : "свои калории"; }
+        if (r[0] === "own") { name = r[1]; sub = NUMS ? `свои · ${Math.round(ownT(ownFromArr(r)).k)}${NB}ккал` : "свои калории"; }
         else {
           const p = getP(r[0]);
           name = p.name;
@@ -620,12 +640,12 @@ view.addEventListener("click", e => {
   else if (ds.dish) openDish(dishById(ds.dish));
   else if (ds.edit) {
     const i = +ds.edit, it = items[i];
-    if (it.own) openOwn(it.name, it.kcal, i);
+    if (it.own) openOwn(it.name, it, i);
     else if (it.dish) openDish(dishById(it.dish), it, i);
     else openPortion(getP(it.id), it, i);
   } else if (ds.recent) {
     const r = recentShown()[+ds.recent];
-    r[0] === "own" ? openOwn(r[1], r[2]) : openPortion(getP(r[0]), { g: r[1], label: r[2], unit: r[3], n: r[4] });
+    r[0] === "own" ? openOwn(r[1], ownFromArr(r)) : openPortion(getP(r[0]), { g: r[1], label: r[2], unit: r[3], n: r[4] });
   } else if (ds.savemeal) openSaveMeal();
   else if (ds.newdish) openEditor(null);
   else if (ds.alldishes) { allDishes = !allDishes; render(); }
@@ -635,7 +655,7 @@ hdr.addEventListener("click", e => { if (e.target.closest("[data-back]")) goBack
 const recentShown = () => recent.filter(r => r[0] === "own" || getP(r[0])).slice(0, 8);
 function quickAdd(i) {
   const r = recentShown()[i];
-  if (r[0] === "own") items.push({ own: true, name: r[1], kcal: r[2] });
+  if (r[0] === "own") items.push(ownFromArr(r));
   else items.push({ id: r[0], g: r[1], label: r[2] || "", unit: r[3], n: r[4] });
   toast(`Добавлено: ${r[0] === "own" ? r[1] : getP(r[0]).name}`);
   render();
@@ -786,29 +806,87 @@ function openPortion(p, prev, editIndex) {
   if ($("del")) $("del").addEventListener("click", () => removeItem(editIndex));
 }
 
-// ---------- Своё: название и калории на всю порцию ----------
-function openOwn(name, kcal, editIndex) {
+// ---------- Своё: название, калории и (по желанию) БЖУ — на 100 г или на всю порцию ----------
+const fmtNum = v => v === null || v === undefined ? "" : numText(v);
+const capFirst = t => t ? t[0].toUpperCase() + t.slice(1) : t;   // названия — с большой буквы, как в базе
+function openOwn(name, prev, editIndex) {
   const editing = editIndex !== undefined, forDish = inDish();
+  let m = prev ? (prev.m || "all") : (ls.get("ownMode") === "all" ? "all" : "100");   // как в прошлый раз
+  const e = prev ? (prev.e || [prev.kcal || 0, null, null, null]) : [null, null, null, null];
+  const field = (id, label, ph) => `<div class="field"><label for="${id}">${label}</label>` +
+    `<input id="${id}" type="text" inputmode="decimal" autocomplete="off"${ph ? ` placeholder="${ph}"` : ""}></div>`;
   showSheet(`
     <div class="head"><span class="ava" aria-hidden="true">${ICON.pencil}</span>
       <span class="main"><span class="title">${forDish ? "Свой продукт" : "Своё блюдо или продукт"}</span>
-      <span class="sub">${forDish ? "Например, готовый соус: калории с упаковки" : "Например, готовая еда с калорийностью на упаковке"}</span></span></div>
-    <div class="field"><label for="ownName">Название</label><input id="ownName" maxlength="60"></div>
-    ${NUMS ? `<div class="field"><label for="ownKcal">${forDish ? "Калорий во всём, что положили (не на 100 г)" : "Калорий на всю порцию (не на 100 г)"}</label>
-      <input id="ownKcal" type="number" inputmode="numeric" min="0" max="5000"></div>` : ""}
+      <span class="sub">Например, готовая еда с КБЖУ на этикетке</span></span></div>
+    <div class="field"><label for="ownName">Название</label><input id="ownName" maxlength="60" autocomplete="off"></div>
+    ${NUMS ? `
+    <div class="field"><span class="flabel">КБЖУ указаны</span>
+      <div class="seg" id="ownSeg"><button data-m="100">На 100 г</button><button data-m="all">На всю порцию</button></div>
+      <span class="hint" id="ownHint"></span></div>
+    <div id="ownGBox">${field("ownG", forDish ? "Сколько граммов положили" : "Сколько граммов съели", "например, 150")}</div>
+    ${field("ownK", "Калории")}
+    <div class="trio">${field("ownP", "Белки")}${field("ownF", "Жиры")}${field("ownC", "Углеводы")}</div>
+    <span class="hint">Белки, жиры и углеводы можно не заполнять — тогда в сумме БЖУ этой еды не будет.</span>
+    <div class="own-sum" id="ownSum"></div>
+    <span class="hint warn" id="ownWarn"></span>` : ""}
     <div class="actions">
       ${editing ? `<button class="secondary" id="del">Убрать</button>` : ""}
       <button class="primary" id="ok">${editing ? "Сохранить" : forDish ? "Добавить в блюдо" : "Добавить в приём"}</button>
     </div>`);
-  $("ownName").value = name || "";
-  if (NUMS) $("ownKcal").value = kcal || "";
-  (NUMS && name ? $("ownKcal") : $("ownName")).focus();
+  $("ownName").value = capFirst(name || "");
+  const val = id => {   // пусто → null, не число → NaN; запятая или точка — всё равно
+    const t = $(id).value.trim().replace(",", ".");
+    if (!t) return null;
+    const x = Number(t);
+    return isFinite(x) ? x : NaN;
+  };
+  const paint = () => {
+    if (!NUMS) return;
+    sheet.querySelectorAll("#ownSeg button").forEach(b => b.classList.toggle("on", b.dataset.m === m));
+    $("ownHint").textContent = m === "100" ? "Как на этикетке: на 100 г продукта"
+      : forDish ? "На всё, что положили в блюдо" : "На всё, что съели: например, вся упаковка";
+    $("ownGBox").style.display = m === "100" ? "" : "none";
+    const k = val("ownK"), p = val("ownP"), f = val("ownF"), c = val("ownC"), g = val("ownG");
+    let sum = "";
+    if (m === "100" && g > 0 && k >= 0) {
+      const x = g / 100, bju = [p, f, c].some(v => v > 0)
+        ? ` · Б ${numText(r1((p || 0) * x))} · Ж ${numText(r1((f || 0) * x))} · У ${numText(r1((c || 0) * x))} г` : "";
+      sum = `= ${Math.round(k * x)} ккал${bju}`;
+    }
+    $("ownSum").textContent = sum;
+    // кДж вместо ккал или опечатка: по БЖУ калорий выходит совсем другое число (4 ккал на 1 г Б и У, 9 — на 1 г Ж)
+    let warn = "";
+    if (m === "100" && k > 900) warn = "Больше 900 ккал на 100 г почти не бывает — возможно, это кДж. Нужны ккал.";
+    else if (k > 0 && p !== null && f !== null && c !== null && p >= 0 && f >= 0 && c >= 0) {
+      const est = 4 * p + 9 * f + 4 * c;
+      if (Math.abs(est - k) > Math.max(30, 0.4 * k)) warn = `Проверьте: по белкам, жирам и углеводам выходит около ${Math.round(est)} ккал.`;
+    }
+    $("ownWarn").textContent = warn;
+  };
+  if (NUMS) {
+    $("ownK").value = fmtNum(e[0]); $("ownP").value = fmtNum(e[1]); $("ownF").value = fmtNum(e[2]); $("ownC").value = fmtNum(e[3]);
+    $("ownG").value = prev && prev.m === "100" ? fmtNum(prev.g) : "";
+    $("ownSeg").addEventListener("click", ev => { const b = ev.target.closest("button"); if (b) { m = b.dataset.m; paint(); } });
+    ["ownG", "ownK", "ownP", "ownF", "ownC"].forEach(id => $(id).addEventListener("input", paint));
+    paint();
+  }
+  (!name ? $("ownName") : !NUMS ? $("ownName") : m === "100" && !$("ownG").value ? $("ownG") : $("ownK")).focus();
   $("ok").addEventListener("click", () => {
-    const nm = $("ownName").value.trim();
-    const k = NUMS ? Math.round(parseFloat(($("ownKcal").value || "").replace(",", "."))) : 0;
+    const nm = capFirst($("ownName").value.trim());
     if (!nm) { toast("Напишите название"); return; }
-    if (NUMS && !(k >= 0 && k <= 5000)) { toast(forDish ? "Напишите калории" : "Напишите калории на всю порцию"); return; }
-    placeItem({ own: true, name: nm, kcal: k }, editIndex, nm);
+    if (!NUMS) { placeItem(ownItem(nm, "all", 0, [0, null, null, null]), editIndex, nm); return; }
+    const per100 = m === "100", k = val("ownK"), g = val("ownG");
+    const bju = [val("ownP"), val("ownF"), val("ownC")];
+    if (per100 && !(g > 0 && g <= 5000)) { toast(forDish ? "Сколько граммов положили?" : "Сколько граммов съели?"); $("ownG").focus(); return; }
+    if (k === null || !(k >= 0)) { toast("Впишите калории"); $("ownK").focus(); return; }
+    if (per100 && k > 950) { toast("Больше 900 ккал на 100 г не бывает — возможно, это кДж. Нужны ккал", 3000); return; }
+    if (!per100 && k > 5000) { toast("Больше 5000 ккал — проверьте число"); return; }
+    if (bju.some(x => x !== null && !(x >= 0 && x <= (per100 ? 100 : 1000)))) {
+      toast(per100 ? "Белки, жиры, углеводы — от 0 до 100 г на 100 г" : "Проверьте белки, жиры и углеводы"); return;
+    }
+    ls.set("ownMode", m);
+    placeItem(ownItem(nm, m, per100 ? r1(g) : 0, [r1(k), ...bju.map(x => x === null ? null : r1(x))]), editIndex, nm);
   });
   if ($("del")) $("del").addEventListener("click", () => removeItem(editIndex));
 }
@@ -917,7 +995,7 @@ function openEditor(d, preset) {
 }
 function ingRow(it, i) {
   const kcal = NUMS ? `${Math.round(ingTotals(it).k)} ккал` : "", data = `data-ing="${i}"`;
-  if (it.own) return row({ name: it.name, sub: NUMS ? "свои калории" : "", kcal, data });
+  if (it.own) return row({ name: it.name, sub: ownSub(it), kcal, data, ava: ICON.pencil });
   if (it.fix) return row({ name: it.name, sub: `моё блюдо · ${it.label}`, kcal, data, ava: ICON.pot, avaCls: "dish" });
   return row({ name: nameOf(it), sub: amountText(it.g, it.label), kcal, data });
 }
@@ -974,7 +1052,7 @@ const numOf = s => parseFloat(String(s || "").replace(",", "."));
 function paintModes() {
   view.querySelectorAll(".opt").forEach(o => o.classList.toggle("on", o.dataset.mode === ed.mode));
   const t = sumT(ed.items, ingTotals), w = numOf(ed.cooked);
-  const raw = ed.items.reduce((s, it) => s + (it.own ? 0 : (it.g || 0)), 0);
+  const raw = sumT(ed.items, ingTotals).g;
   $("perW").textContent = NUMS && w >= 10 && t.k ? `= ${Math.round(t.k * 100 / w)} ккал на 100 г` : "";
   const odd = w > 0 && raw > 0 && (w < raw * 0.4 || w > raw * 6);   // 1,65 вместо 1650 или лишний ноль
   $("cwHint").textContent = odd ? `Проверьте вес: продукты вместе весят ${Math.round(raw)} г. Вес — в граммах.`
@@ -989,7 +1067,7 @@ function editorClick(e) {
   const ds = el.dataset;
   if (ds.ing !== undefined) {
     const i = +ds.ing, it = ed.items[i];
-    if (it.own) openOwn(it.name, it.kcal, i);
+    if (it.own) openOwn(it.name, it, i);
     else if (it.fix) openFix(i);
     else openPortion(getP(it.id) || Object.assign({ id: it.id, brand: "" }, snap(it)), it, i);
   } else if (ds.type) {
@@ -1071,7 +1149,7 @@ async function deleteDish(btn) {
 
 // ---------- «Сохранить этот приём как блюдо» ----------
 function toIng(it) {   // строка приёма → строка состава блюда
-  if (it.own) return { own: true, name: it.name, kcal: it.kcal || 0 };
+  if (it.own) return ownFromArr(ownToArr(it));   // копия
   if (it.dish) {
     const d = dishById(it.dish), t = dishItemTotals(it), w = d && dishUnit(d).byWeight;
     return { fix: true, name: nameOf(it), label: w ? `${Math.round(it.g)} г` : it.label, kcal: r1(t.k), p: r1(t.p), f: r1(t.f),
@@ -1082,7 +1160,7 @@ function toIng(it) {   // строка приёма → строка соста�
 function openSaveMeal() {
   let type = "one";
   const lines = items.map(it => {
-    const amt = it.own ? "" : it.dish ? (dishById(it.dish) && dishUnit(dishById(it.dish)).byWeight ? `${Math.round(it.g)} г` : it.label)
+    const amt = it.own ? (it.m === "100" ? `${gText(it.g)}${NB}г` : "") : it.dish ? (dishById(it.dish) && dishUnit(dishById(it.dish)).byWeight ? `${Math.round(it.g)} г` : it.label)
                                        : (it.label || `${Math.round(it.g)} г`);
     return `<div><b>${esc(nameOf(it))}${amt ? ` <i>· ${esc(amt)}</i>` : ""}</b>${NUMS ? `<span class="k">${kcalOf(it)} ккал</span>` : ""}</div>`;
   }).join("");
@@ -1147,7 +1225,11 @@ async function submit() {
   const payload = {
     v: 2,
     i: items.filter(it => !it.own && !it.dish).map(it => [it.id, it.g, it.label || ""]),
-    o: items.filter(it => it.own).map(it => [it.name.slice(0, 60), it.kcal || 0]),
+    o: items.filter(it => it.own).map(it => {   // [название, ккал, Б, Ж, У, г] — на то, что съедено; пустые БЖУ — null
+      const t = ownT(it), e = it.e || [];
+      return [it.name.slice(0, 60), Math.round(t.k), ...[1, 2, 3].map(i => e[i] === null || e[i] === undefined ? null
+              : r1([t.p, t.f, t.c][i - 1])), Math.round(t.g || 0)];
+    }),
     d: items.filter(it => it.dish && dishById(it.dish)).map(it => {
       const d = dishById(it.dish), t = dishItemTotals(it), w = dishUnit(d).byWeight;
       return [d.name.slice(0, 60), w ? "" : it.label, Math.round(t.k), r1(t.p), r1(t.f), r1(t.c), r1(t.fb), w ? Math.round(it.g) : 0];
@@ -1191,7 +1273,7 @@ function loadRecent() {
 }
 function saveRecent() {
   const now = items.filter(it => !it.dish)   // мои блюда — в своём разделе, в «Недавнем» не повторяем
-    .map(it => it.own ? ["own", it.name, it.kcal || 0] : [it.id, it.g, it.label || "", it.unit || "", it.n || 0]);
+    .map(it => it.own ? ownToArr(it) : [it.id, it.g, it.label || "", it.unit || "", it.n || 0]);
   const key = r => r[0] === "own" ? "own:" + r[1] : r[0];
   const seen = new Set(), merged = [];
   for (const r of now.concat(recent)) if (!seen.has(key(r))) { seen.add(key(r)); merged.push(r); }
