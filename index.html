@@ -193,7 +193,7 @@ const tg = window.Telegram && window.Telegram.WebApp;
 // (документация Telegram). Вне Telegram platform = "unknown".
 const IN_TG = !!(tg && tg.platform && tg.platform !== "unknown");
 const NUMS = new URLSearchParams(location.search).get("nums") !== "0";  // человек скрыл калории — не показываем
-const DATA_VERSION = "5";
+const DATA_VERSION = "6";
 const $ = id => document.getElementById(id);
 const ver = v => !!(tg && tg.isVersionAtLeast && tg.isVersionAtLeast(v));
 
@@ -287,6 +287,8 @@ const FORMS = {  // 1 / 2–4 / 5+ (дробное — как 2–4: «1,5 та�
   "кружка": ["кружка", "кружки", "кружек"], "бокал": ["бокал", "бокала", "бокалов"],
   "рюмка": ["рюмка", "рюмки", "рюмок"], "кусок": ["кусок", "куска", "кусков"],
   "ломтик": ["ломтик", "ломтика", "ломтиков"], "стакан": ["стакан", "стакана", "стаканов"],
+  "плитка": ["плитка", "плитки", "плиток"], "бутылка": ["бутылка", "бутылки", "бутылок"],
+  "банка": ["банка", "банки", "банок"],
 };
 const numText = n => String(+n.toFixed(2)).replace(".", ",");
 const gText = g => g < 10 ? numText(Math.round(g * 10) / 10) : String(Math.round(g));   // «4,5», «75»
