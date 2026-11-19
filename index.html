@@ -193,7 +193,7 @@ const tg = window.Telegram && window.Telegram.WebApp;
 // (документация Telegram). Вне Telegram platform = "unknown".
 const IN_TG = !!(tg && tg.platform && tg.platform !== "unknown");
 const NUMS = new URLSearchParams(location.search).get("nums") !== "0";  // человек скрыл калории — не показываем
-const DATA_VERSION = "6";
+const DATA_VERSION = "7";
 const $ = id => document.getElementById(id);
 const ver = v => !!(tg && tg.isVersionAtLeast && tg.isVersionAtLeast(v));
 
@@ -236,12 +236,12 @@ const queryWords = q => words(q).filter(w => !STOP.has(w) && !UNITS.has(w));
 
 // ---------- База ----------
 let ALL = [], BY_ID = new Map(), BY_LC = new Map(), offLoaded = false;
-// наша база: [id, name, synonyms, kcal, p, f, c, fiber, piece, tbsp, tsp, ml, мерки, порция]
+// наша база: [id, name, synonyms, kcal, p, f, c, fiber, piece, tbsp, tsp, ml, мерки, порция, первая единица]
 function addBase(rows) {
   for (const r of rows) {
     const variants = [r[1], ...r[2].split(",")].filter(s => s.trim()).map(words);
     add({ id: r[0], name: r[1], brand: "", k: r[3], p: r[4], f: r[5], c: r[6], fb: r[7] || 0, pc: r[8], tb: r[9],
-          ts: r[10], ml: r[11], ms: r[12] || [], po: r[13] || 0, tier: 0, variants, keys: variants.flat() });
+          ts: r[10], ml: r[11], ms: r[12] || [], po: r[13] || 0, first: r[14] || "", tier: 0, variants, keys: variants.flat() });
   }
 }
 // магазины: [id, name, brand, kcal, p, f, c, piece, слова для поиска, ≈piece, мерки, клетчатка]
@@ -300,7 +300,19 @@ function plural(n, word) {
   const k = n % 100, d = n % 10;
   return `${numText(n)} ${k >= 11 && k <= 14 ? f[2] : d === 1 ? f[0] : d >= 2 && d <= 4 ? f[1] : f[2]}`;
 }
-function unitsOf(p) {   // какие единицы есть у продукта: {key, word, grams, hint}
+// Первой в окне порции стоит единица, в которой этот продукт удобнее считать (решение Лизы 19.11):
+// яйцо, фрукты, печенье — штуки; хлеб, сыр, колбаса — ломтики; торт, пицца — куски (колонка unit_first
+// в products.csv); всё остальное — граммы. У магазинных продуктов штуки первыми — только если вес штуки
+// с упаковки (батончик, сырок), примерный вес «≈ шт» — после граммов.
+function unitsOf(p) {   // какие единицы есть у продукта: {key, word, grams, hint} — первой самая удобная
+  const u = unitsRaw(p);
+  const g = u.find(x => x.key === "г");
+  const want = p.first || (p.pc && p.tier === 1 ? "шт" : "г");
+  const first = u.find(x => x.key === want) || g;   // такой единицы у продукта нет — граммы
+  const rest = u.filter(x => x !== first && x !== g);
+  return first === g ? [g, ...rest] : [first, g, ...rest];
+}
+function unitsRaw(p) {
   const u = [];
   const ms = p.ms || [];
   // порция = тарелка (350 мл у супа) — вторая кнопка с тем же весом не нужна
@@ -310,11 +322,16 @@ function unitsOf(p) {   // какие единицы есть у продукт�
   else if (p.pe) u.push({ key: "≈ шт", word: "шт", grams: p.pe, hint: `≈ ${gText(p.pe)} г`, approx: true });
   if (p.tb) u.push({ key: "ст. л.", word: "ст. л.", grams: p.tb, hint: `${gText(p.tb)} г` });
   if (p.ts) u.push({ key: "ч. л.", word: "ч. л.", grams: p.ts, hint: `${gText(p.ts)} г` });
-  if (p.ml && !ms.some(m => m[0] === "тарелка")) u.push({ key: "стакан", word: "стакан", grams: 200 * p.ml, hint: "200 мл" });
+  // «стакан» — для жидкого и сыпучего; у штучного (яйцо, апельсин, морковь) стакан ни к чему
+  if (p.ml && !ms.some(m => m[0] === "тарелка") && p.first !== "шт")
+    u.push({ key: "стакан", word: "стакан", grams: 200 * p.ml, hint: "200 мл" });
   u.push({ key: "г", word: "г", grams: 1, hint: "" });
   return u;
 }
 const COUNTS = [0.5, 1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10];
+// мелкие штуки (яйцо, печенье, конфета — до 70 г) считаем целыми: «1,5 яйца» не бывает;
+// половинки — у крупных (½ яблока, ½ банана), тарелок, порций, ложек
+const wholeOnly = u => u.word === "шт" && u.grams <= 70;
 const unitLabel = (u, n) => u.key === "г" ? "" : (u.approx ? "≈ " : "") + plural(n, u.word);
 function stepCount(n, dir) {   // 0,5 → 1 → 1,5 … 10, дальше по одной
   const i = COUNTS.findIndex(c => c >= n - 1e-9);
@@ -736,8 +753,8 @@ const snap = p => ({ name: p.name, k: p.k, p: p.p, f: p.f, c: p.c, fb: p.fb || 0
 function openPortion(p, prev, editIndex) {
   if (!p) return;
   const units = unitsOf(p);
-  // единица и количество: как было в записи, иначе порция → штука → 100 г
-  let u = units.find(x => prev && x.key === prev.unit) || (prev ? units[units.length - 1] : units[0]);
+  // единица и количество: как было в записи, иначе первая удобная (unitsOf) — штуки, ломтики или 100 г
+  let u = units.find(x => prev && x.key === prev.unit) || (prev ? units.find(x => x.key === "г") : units[0]);
   let n = prev ? (u.key === "г" ? prev.g : (prev.n || 1)) : (u.key === "г" ? 100 : 1);
   const editing = editIndex !== undefined;
   const chips = units.map((x, i) =>
@@ -786,6 +803,7 @@ function openPortion(p, prev, editIndex) {
   paint();
   const stepTo = dir => {
     if (u.key === "г") n = Math.max(5, Math.round((n + dir * 10) / 5) * 5);
+    else if (wholeOnly(u)) n = Math.max(1, Math.round(n) + dir);
     else n = stepCount(n, dir);
     paint();
   };
